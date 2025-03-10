@@ -70,7 +70,7 @@ while True:
                 print(XANDO[0][2], "Победил")
                 break
             else:
-                if "-" in XANDO:
+                if "-" not in str(XANDO):
                     print("Ничья!")
                     break
                 else:
