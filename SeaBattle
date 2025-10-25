@@ -1,0 +1,315 @@
+import random
+from collections import namedtuple
+
+
+BOARD_SIZE = 6
+SHIP_CONFIG = {
+    3: 1,
+    2: 2,
+    1: 4
+}
+
+Dot = namedtuple("Dot", ["row", "col"])
+
+class BoardException(Exception):
+    pass
+
+class BoardOutException(BoardException):
+    def __str__(self):
+        return "Ну вот как из поля 6 на 6 можно попасть не туда? Выбери другие корды, АЛЛО"
+
+class BoardUsedException(BoardException):
+    def __str__(self):
+        return "Не, ну ты реально тупой. В эту клетку нельзя стрелять"
+
+class BoardWrongShipException(BoardException):
+    pass
+
+class Ship:
+    def __init__(self, bow: Dot, length: int, orientation: str):
+        self.bow = bow
+        self.length = length
+        self.orientation = orientation
+        self.lives = length
+        self.dots = self._get_ship_dots()
+        self.hits = [False] * length
+
+    def _get_ship_dots(self):
+        ship_dots = []
+        for i in range(self.length):
+            if self.orientation == "hor":
+                ship_dots.append(Dot(self.bow.row, self.bow.col + i))
+            elif self.orientation == "vert":
+                ship_dots.append(Dot(self.bow.row + i, self.bow.col))
+        return ship_dots
+
+    def is_sunk(self):
+        return self.lives == 0
+
+    def __contains__(self, dot: Dot):
+        return dot in self.dots
+
+class Board:
+    def __init__(self, hid_ships=False):
+        self.size = BOARD_SIZE
+        self.hid_ships = hid_ships
+        self.field = [['O'] * self.size for _ in range(self.size)]
+        self.ships = []
+        self.busy_dots = set()
+        self.shot_dots = set()
+        self.live_ships = 0
+
+    def _is_on_board(self, dot: Dot):
+        return 0 <= dot.row < self.size and 0 <= dot.col < self.size
+
+    def _contour(self, ship: Ship, mark_busy=False):
+        around = [
+            (-1, -1), (-1, 0), (-1, 1),
+            (0, -1), (0, 0), (0, 1),
+            (1, -1), (1, 0), (1, 1)
+        ]
+        for ship_dot in ship.dots:
+            for dr, dc in around:
+                cur_dot = Dot(ship_dot.row + dr, ship_dot.col + dc)
+                if self._is_on_board(cur_dot) and cur_dot not in self.busy_dots:
+                    if mark_busy:
+                        self.busy_dots.add(cur_dot)
+
+    def add_ship(self, ship: Ship):
+        for dot in ship.dots:
+            if not self._is_on_board(dot) or dot in self.busy_dots:
+                raise BoardWrongShipException("Нельзя так разместить корабль, тупое ты создание")
+
+        self.ships.append(ship)
+        self.live_ships += 1
+
+        for dot in ship.dots:
+            self.field[dot.row][dot.col] = '■'
+            self.busy_dots.add(dot)
+
+        self._contour(ship, mark_busy=True)
+
+    def shoot(self, dot: Dot):
+        if not self._is_on_board(dot):
+            raise BoardOutException()
+        if dot in self.shot_dots:
+            raise BoardUsedException()
+
+        self.shot_dots.add(dot)
+
+        for ship in self.ships:
+            if dot in ship.dots:
+                ship.lives -= 1
+                self.field[dot.row][dot.col] = 'X' 
+                print("Чиназэс")
+                if ship.is_sunk():
+                    self.live_ships -= 1
+                    print("Опа, СЮДА!")
+                    self._mark_sunk_ship_contour_as_miss(ship)
+                    return True
+                return True
+
+        self.field[dot.row][dot.col] = 'T' 
+        print("О КАК")
+        return False
+
+    def _mark_sunk_ship_contour_as_miss(self, ship: Ship):
+        around = [
+            (-1, -1), (-1, 0), (-1, 1),
+            (0, -1), (0, 0), (0, 1),
+            (1, -1), (1, 0), (1, 1)
+        ]
+        for ship_dot in ship.dots:
+            for dr, dc in around:
+                cur_dot = Dot(ship_dot.row + dr, ship_dot.col + dc)
+                if self._is_on_board(cur_dot) and cur_dot not in self.shot_dots:
+                    self.field[cur_dot.row][cur_dot.col] = 'T'
+                    self.shot_dots.add(cur_dot)
+
+    def display(self):
+        header = "  | " + " | ".join(str(i) for i in range(1, self.size + 1)) + " |"
+        board_str_list = [header]
+        board_str_list.append("--" + "---" * self.size + "-")
+
+        for r_idx, row in enumerate(self.field):
+            row_display = []
+            for cell_content in row:
+                if cell_content == '■' and self.hid_ships == True:
+                    row_display.append('O')
+                else:
+                    row_display.append(cell_content)
+            board_str_list.append(f"{r_idx + 1} | {' | '.join(row_display)} |")
+
+        return "\n".join(board_str_list)
+
+def place_random_ships(board: Board):
+    attempts = 0
+    max_attempts = 100
+
+    for ship_len, count in SHIP_CONFIG.items():
+        for _ in range(count):
+            while True:
+                attempts += 1
+                if attempts > max_attempts:
+                    raise BoardWrongShipException("Зачем вы вообще пытаетесь?")
+                bow = Dot(random.randint(0, BOARD_SIZE - 1), random.randint(0, BOARD_SIZE - 1))
+                orientation = random.choice(["hor", "vert"])
+                ship = Ship(bow, ship_len, orientation)
+                valid_placement = True
+                for dot in ship.dots:
+                    if not board._is_on_board(dot):
+                        valid_placement = False
+                        break
+                    if dot in board.busy_dots:
+                        valid_placement = False
+                        break
+
+                if valid_placement:
+                    try:
+                        board.add_ship(ship)
+                        attempts = 0
+                        break
+                    except BoardWrongShipException:
+                        pass
+    return board
+
+class Player:
+    def __init__(self, board: Board, enemy_board: Board):
+        self.board = board
+        self.enemy_board = enemy_board
+
+    def ask_for_shot(self) -> Dot:
+        raise NotImplementedError()
+
+    def make_move(self) -> bool:
+        while True:
+            try:
+                target_dot = self.ask_for_shot()
+                return self.enemy_board.shoot(target_dot) 
+            except BoardException as e:
+                print(e)
+            except ValueError:
+                print("Ну какое же ты.. Вводи две цифры через пробел, только и всего")
+
+class UserPlayer(Player):
+    def ask_for_shot(self) -> Dot:
+        while True:
+            coords = input("Ходи давай, Дядя(строка столбец): ").split()
+            if len(coords) != 2:
+                print("ДВЕ КООРДИНАТТЫ ЧЕРЕЗ ПРОБЕЛ ЭТО ТАК СЛОЖНО??!!?11")
+                continue
+            try:
+                row, col = int(coords[0]) - 1, int(coords[1]) - 1
+                return Dot(row, col)
+            except ValueError:
+                print("Мда. Перепутать цифры и буквы. Ты просто нечто")
+
+class AIPlayer(Player):
+    def ask_for_shot(self) -> Dot:
+        while True:
+            dot = Dot(random.randint(0, BOARD_SIZE - 1), random.randint(0, BOARD_SIZE - 1))
+            if dot not in self.enemy_board.shot_dots:
+                print(f"Наконец-то мой ход: {dot.row + 1} {dot.col + 1}")
+                return dot
+
+class Game:
+    def __init__(self):
+        self.user_board = None
+        self.ai_board = None
+        self.user = None
+        self.ai = None
+        self.current_turn = None
+
+    def _create_boards(self):
+        user_board_temp = Board()
+        print("Собираем команду неудачников.")
+        while True:
+            try:
+                user_board_temp = place_random_ships(Board())
+                break
+            except BoardWrongShipException as e:
+                print(f"Неудачники подскользнулись. {e}. Боже, какие вы долгие")
+                user_board_temp = Board()
+
+        ai_board_temp = Board(hid_ships=True)
+        print("Отбираем лучших из лучших")
+        while True:
+            try:
+                ai_board_temp = place_random_ships(Board())
+                break
+            except BoardWrongShipException as e:
+                print(f"Берём большее припасов. Не забывайте Ром. Может взять ещё один корабль с собой, хм...")
+                ai_board_temp = Board(hid_ships=True)
+
+        self.user_board = user_board_temp
+        self.ai_board = ai_board_temp
+
+        self.user = UserPlayer(self.user_board, self.ai_board)
+        self.ai = AIPlayer(self.ai_board, self.user_board)
+
+        self.current_turn = 0
+
+    def _greet(self):
+        print("-------------------")
+        print("  Здарова, Дядя!  ")
+        print("    Зашёл поиграть в морской бой?   ")
+        print("      У тебя что, совсем друзей нет?  ")
+        print("        Ты же против ИИ играешь, LOL.  ")
+        print("-------------------")
+        print("  Ладно, быстро правила  ")
+        print("  Формат ввода x и y   ")
+        print("  х - номер строки  ")
+        print("  y - номер столбца  ")
+        print("  Тренировки нет ")
+        print("-------------------")
+
+    def _print_boards(self):
+        user_lines = self.user_board.display().split("\n")
+        ai_lines = self.ai_board.display().split("\n")
+        max_len_user = max(len(line) for line in user_lines) if user_lines else 0
+        max_len_ai = max(len(line) for line in ai_lines) if ai_lines else 0
+
+        print("\n" + "="*50)
+        print(f"{'Поле Додика':<{max_len_user}}        {'Поле Победителя':<{max_len_ai}}")
+        for i in range(max(len(user_lines), len(ai_lines))):
+            line_user = user_lines[i] if i < len(user_lines) else ""
+            line_ai = ai_lines[i] if i < len(ai_lines) else ""
+            print(f"{line_user:<{max_len_user}}        {line_ai:<{max_len_ai}}")
+        print("="*50 + "\n")
+
+
+    def _loop(self):
+        while True:
+            self._print_boards()
+
+            if self.current_turn == 0:
+                print("Ладно, я поддамся")
+                repeat_turn = self.user.make_move()
+            else:
+                print("Всё идёт по плаануууу")
+                repeat_turn = self.ai.make_move()
+
+            if self.ai_board.live_ships == 0:
+                self._print_boards()
+                print("Невозможно! "
+                      "Не может быть! "
+                      "Ты читерил? "
+                      "Или ты Айтишник??? 2")
+                break
+            if self.user_board.live_ships == 0:
+                self._print_boards()
+                print("О твоём страдании сложат легенды!")
+                print("Но не о твоём рейтинге.")
+                break
+
+            if not repeat_turn:
+                self.current_turn = 1 - self.current_turn
+
+    def start(self):
+        self._greet()
+        self._create_boards()
+        self._loop()
+
+if __name__ == "__main__":
+    game = Game()
+    game.start()
